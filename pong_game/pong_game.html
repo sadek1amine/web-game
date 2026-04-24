@@ -1,0 +1,235 @@
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+#gw{background:#000;display:flex;flex-direction:column;align-items:center;padding:14px 0;font-family:var(--font-mono);width:100%;color:#fff}
+#title{font-size:17px;letter-spacing:6px;color:#fff;margin-bottom:10px;opacity:0.7}
+#wrap{position:relative}
+#gc{display:block}
+#overlay{position:absolute;inset:0;background:rgba(0,0,0,0.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px}
+#overlay h2{font-size:24px;letter-spacing:5px;color:#fff}
+#overlay p{font-size:12px;color:#555;text-align:center;line-height:2}
+#overlay button{padding:9px 28px;background:transparent;border:1px solid #fff;color:#fff;font-size:13px;font-family:var(--font-mono);cursor:pointer;border-radius:3px;letter-spacing:2px}
+#overlay button:hover{background:#ffffff18}
+.mode-btns{display:flex;gap:10px}
+.mode-btns button{padding:8px 18px;font-size:12px;letter-spacing:1px}
+#hint{color:#222;font-size:11px;margin-top:8px;letter-spacing:0.5px}
+</style>
+<div id="gw">
+  <div id="title">PONG</div>
+  <div id="wrap">
+    <canvas id="gc" width="560" height="400"></canvas>
+    <div id="overlay">
+      <h2>PONG</h2>
+      <p>First to 7 wins<br><br>
+        <b style="color:#aaa">1 PLAYER</b> — W/S or ↑↓ to move<br>
+        <b style="color:#aaa">2 PLAYERS</b> — Left: W/S &nbsp;|&nbsp; Right: ↑/↓
+      </p>
+      <div class="mode-btns">
+        <button id="btn1p">1 PLAYER</button>
+        <button id="btn2p">2 PLAYERS</button>
+      </div>
+    </div>
+  </div>
+  <div id="hint">W / S &nbsp;·&nbsp; ↑ / ↓</div>
+</div>
+<script>
+const C=document.getElementById('gc'),ctx=C.getContext('2d');
+const W=560,H=400,PADDLE_W=10,PADDLE_H=70,BALL_SIZE=8,WIN_SCORE=7;
+
+let leftPaddle,rightPaddle,ball,particles,score,gameState,keys,mode,flashTimer,rallyCount;
+
+function makePaddle(side){
+  return{x:side==='left'?18:W-18-PADDLE_W,y:H/2-PADDLE_H/2,w:PADDLE_W,h:PADDLE_H,vy:0,score:0};
+}
+
+function makeBall(dir){
+  let ang=(Math.random()-0.5)*0.7;
+  let d=dir||((Math.random()<0.5)?1:-1);
+  let spd=4.5;
+  return{x:W/2,y:H/2,vx:Math.cos(ang)*spd*d,vy:Math.sin(ang)*spd,trail:[],size:BALL_SIZE};
+}
+
+function init(m){
+  mode=m||mode||'1p';
+  leftPaddle=makePaddle('left');
+  rightPaddle=makePaddle('right');
+  ball=makeBall();
+  particles=[];score={left:0,right:0};
+  flashTimer=0;rallyCount=0;
+  gameState='playing';
+  document.getElementById('overlay').style.display='none';
+}
+
+function showOverlay(h,p){
+  let ov=document.getElementById('overlay');
+  ov.innerHTML=`<h2>${h}</h2><p>${p}</p><div class="mode-btns"><button id="btn1p">1 PLAYER</button><button id="btn2p">2 PLAYERS</button></div>`;
+  ov.style.display='flex';
+  document.getElementById('btn1p').addEventListener('click',()=>init('1p'));
+  document.getElementById('btn2p').addEventListener('click',()=>init('2p'));
+}
+
+function spawnParticles(x,y,col,n){
+  for(let i=0;i<n;i++){
+    let a=Math.random()*Math.PI*2,sp=1+Math.random()*4;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,col,size:2+Math.random()*2});
+  }
+}
+
+function resetBall(loser){
+  rallyCount=0;
+  ball=makeBall(loser==='left'?1:-1);
+}
+
+function aiMove(paddle,ball){
+  let diff=ball.y-(paddle.y+paddle.h/2);
+  // difficulty scales with rally
+  let speed=Math.min(3.5+rallyCount*0.12,6.2);
+  if(Math.abs(diff)>4)paddle.y+=diff>0?Math.min(diff,speed):-Math.min(-diff,speed);
+}
+
+function clampPaddle(p){p.y=Math.max(0,Math.min(H-p.h,p.y));}
+
+function update(){
+  if(gameState!=='playing')return;
+  if(flashTimer>0)flashTimer--;
+
+  // Left paddle (always player)
+  let lspd=6;
+  if(keys['w']||keys['W']||keys['ArrowUp']&&mode==='2p')leftPaddle.y-=lspd;
+  if(keys['s']||keys['S']||keys['ArrowDown']&&mode==='2p')leftPaddle.y+=lspd;
+  clampPaddle(leftPaddle);
+
+  // Right paddle
+  if(mode==='2p'){
+    if(keys['ArrowUp'])rightPaddle.y-=lspd;
+    if(keys['ArrowDown'])rightPaddle.y+=lspd;
+  }else{
+    aiMove(rightPaddle,ball);
+  }
+  clampPaddle(rightPaddle);
+
+  // Ball trail
+  ball.trail.unshift({x:ball.x,y:ball.y});
+  if(ball.trail.length>10)ball.trail.pop();
+
+  ball.x+=ball.vx;ball.y+=ball.vy;
+
+  // Top/bottom walls
+  if(ball.y-ball.size<0){ball.y=ball.size;ball.vy=Math.abs(ball.vy);spawnParticles(ball.x,0,'#fff',4);}
+  if(ball.y+ball.size>H){ball.y=H-ball.size;ball.vy=-Math.abs(ball.vy);spawnParticles(ball.x,H,'#fff',4);}
+
+  // Left paddle hit
+  if(ball.vx<0&&ball.x-ball.size<leftPaddle.x+leftPaddle.w&&ball.x-ball.size>leftPaddle.x&&
+     ball.y>leftPaddle.y-ball.size&&ball.y<leftPaddle.y+leftPaddle.h+ball.size){
+    ball.x=leftPaddle.x+leftPaddle.w+ball.size;
+    let rel=(ball.y-(leftPaddle.y+leftPaddle.h/2))/(leftPaddle.h/2);
+    let ang=rel*1.1;
+    let spd=Math.min(Math.hypot(ball.vx,ball.vy)+0.18,12);
+    ball.vx=Math.cos(ang)*spd;ball.vy=Math.sin(ang)*spd;
+    rallyCount++;flashTimer=4;
+    spawnParticles(ball.x,ball.y,'#88aaff',6);
+  }
+
+  // Right paddle hit
+  if(ball.vx>0&&ball.x+ball.size>rightPaddle.x&&ball.x+ball.size<rightPaddle.x+rightPaddle.w&&
+     ball.y>rightPaddle.y-ball.size&&ball.y<rightPaddle.y+rightPaddle.h+ball.size){
+    ball.x=rightPaddle.x-ball.size;
+    let rel=(ball.y-(rightPaddle.y+rightPaddle.h/2))/(rightPaddle.h/2);
+    let ang=Math.PI-rel*1.1;
+    let spd=Math.min(Math.hypot(ball.vx,ball.vy)+0.18,12);
+    ball.vx=Math.cos(ang)*spd;ball.vy=Math.sin(ang)*spd;
+    rallyCount++;flashTimer=4;
+    spawnParticles(ball.x,ball.y,'#ffaa55',6);
+  }
+
+  // Score
+  if(ball.x-ball.size<0){
+    score.right++;spawnParticles(50,H/2,'#fff',18,true);flashTimer=10;
+    if(score.right>=WIN_SCORE){gameState='over';showOverlay(mode==='1p'?'YOU LOSE':'RIGHT WINS','Play again?');return;}
+    resetBall('left');
+  }
+  if(ball.x+ball.size>W){
+    score.left++;spawnParticles(W-50,H/2,'#fff',18);flashTimer=10;
+    if(score.left>=WIN_SCORE){gameState='over';showOverlay(mode==='1p'?'YOU WIN! 🏆':'LEFT WINS','Play again?');return;}
+    resetBall('right');
+  }
+
+  particles=particles.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.06;p.life-=0.035;return p.life>0;});
+}
+
+// --- DRAW ---
+function drawNet(){
+  ctx.setLineDash([8,10]);ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);
+}
+
+function drawPaddle(p,col){
+  let g=ctx.createLinearGradient(p.x,p.y,p.x+p.w,p.y);
+  g.addColorStop(0,col+'cc');g.addColorStop(1,'#fff');
+  ctx.fillStyle=g;
+  ctx.beginPath();ctx.roundRect(p.x,p.y,p.w,p.h,4);ctx.fill();
+  ctx.shadowColor=col;ctx.shadowBlur=16;
+  ctx.strokeStyle=col;ctx.lineWidth=1;
+  ctx.beginPath();ctx.roundRect(p.x,p.y,p.w,p.h,4);ctx.stroke();
+  ctx.shadowBlur=0;
+}
+
+function drawBall(){
+  // trail
+  ball.trail.forEach((t,i)=>{
+    let a=(1-i/ball.trail.length)*0.3;
+    ctx.globalAlpha=a;ctx.fillStyle='#fff';
+    ctx.beginPath();ctx.arc(t.x,t.y,ball.size*(0.9-i/ball.trail.length*0.5),0,Math.PI*2);ctx.fill();
+  });ctx.globalAlpha=1;
+  // glow
+  ctx.shadowColor='#fff';ctx.shadowBlur=18;
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ball.x,ball.y,ball.size,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+}
+
+function drawScore(){
+  ctx.font='500 52px monospace';ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillStyle='rgba(255,255,255,0.12)';
+  ctx.fillText(score.left,W/2-70,14);
+  ctx.fillText(score.right,W/2+70,14);
+}
+
+function drawLabels(){
+  ctx.font='10px monospace';ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillStyle='rgba(255,255,255,0.2)';
+  ctx.fillText('YOU',W/2-80,H-4);
+  ctx.fillText(mode==='1p'?'CPU':'P2',W/2+80,H-4);
+}
+
+function draw(){
+  ctx.fillStyle=flashTimer>0?'#1a1a1a':'#000';ctx.fillRect(0,0,W,H);
+  drawNet();drawScore();drawLabels();
+  drawPaddle(leftPaddle,'#88aaff');
+  drawPaddle(rightPaddle,'#ffaa55');
+  drawBall();
+  particles.forEach(p=>{
+    ctx.globalAlpha=p.life;ctx.fillStyle=p.col;
+    ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+  });ctx.globalAlpha=1;
+}
+
+keys={};
+document.addEventListener('keydown',e=>{keys[e.key]=true;if(['ArrowUp','ArrowDown',' '].includes(e.key))e.preventDefault();});
+document.addEventListener('keyup',e=>{keys[e.key]=false;});
+
+// Mobile touch
+let touchY=null;
+C.addEventListener('touchstart',e=>{touchY=e.touches[0].clientY;e.preventDefault();},{passive:false});
+C.addEventListener('touchmove',e=>{
+  if(touchY===null)return;
+  let dy=e.touches[0].clientY-touchY;touchY=e.touches[0].clientY;
+  leftPaddle.y=Math.max(0,Math.min(H-leftPaddle.h,leftPaddle.y+dy*1.5));
+  e.preventDefault();
+},{passive:false});
+
+document.getElementById('btn1p').addEventListener('click',()=>init('1p'));
+document.getElementById('btn2p').addEventListener('click',()=>init('2p'));
+
+function loop(){update();draw();requestAnimationFrame(loop);}
+loop();
+</script>
