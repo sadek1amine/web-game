@@ -1,0 +1,274 @@
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+#gw{background:#1a1a1a;display:flex;flex-direction:column;align-items:center;padding:14px 0;font-family:var(--font-mono);width:100%;color:#fff;min-height:100%}
+#title{font-size:17px;letter-spacing:5px;color:#e0e0e0;margin-bottom:10px}
+#topbar{display:flex;align-items:center;gap:16px;margin-bottom:10px;background:#2a2a2a;padding:8px 18px;border-radius:8px;border:1px solid #333}
+.counter{font-size:22px;font-weight:500;color:#f44;letter-spacing:2px;min-width:48px;text-align:center}
+#face-btn{font-size:22px;cursor:pointer;background:#333;border:none;border-radius:6px;padding:2px 10px;color:#fff;transition:background 0.1s}
+#face-btn:hover{background:#444}
+.timer-val{font-size:22px;font-weight:500;color:#0f0;letter-spacing:2px;min-width:48px;text-align:center}
+#diff-row{display:flex;gap:8px;margin-bottom:10px}
+.dbtn{padding:5px 14px;background:#222;border:1px solid #333;color:#aaa;font-size:11px;font-family:var(--font-mono);cursor:pointer;border-radius:4px;letter-spacing:1px}
+.dbtn:hover,.dbtn.active{background:#333;color:#fff;border-color:#555}
+#board-wrap{overflow:auto;max-width:100%}
+#board{display:inline-grid;gap:2px;padding:10px;background:#222;border-radius:8px;border:1px solid #333}
+.cell{width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;border-radius:4px;cursor:pointer;user-select:none;transition:background 0.08s,transform 0.06s;position:relative}
+.cell.hidden{background:#3a3a3a;border:1px solid #4a4a4a}
+.cell.hidden:hover{background:#454545;transform:scale(1.07)}
+.cell.hidden:active{transform:scale(0.95)}
+.cell.revealed{background:#252525;border:1px solid #2e2e2e;cursor:default}
+.cell.flagged{background:#3a3a3a;border:1px solid #4a4a4a}
+.cell.mine-hit{background:#8b0000!important}
+.cell.mine-reveal{background:#2a2020}
+.n1{color:#4af}.n2{color:#4f4}.n3{color:#f66}.n4{color:#a4f}.n5{color:#f84}.n6{color:#0ff}.n7{color:#fff}.n8{color:#aaa}
+#status{margin-top:10px;font-size:12px;color:#555;letter-spacing:1px;height:16px}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:10}
+#overlay.show{display:flex}
+#obox{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:28px 36px;display:flex;flex-direction:column;align-items:center;gap:12px}
+#obox h2{font-size:22px;letter-spacing:3px}
+#obox p{font-size:12px;color:#666;text-align:center}
+#obox button{padding:8px 26px;background:transparent;border:1px solid #666;color:#ccc;font-size:12px;font-family:var(--font-mono);cursor:pointer;border-radius:4px;letter-spacing:2px}
+#obox button:hover{background:#333}
+</style>
+<div id="gw">
+  <div id="title">MINESWEEPER</div>
+  <div id="diff-row">
+    <button class="dbtn active" data-d="easy">EASY</button>
+    <button class="dbtn" data-d="medium">MEDIUM</button>
+    <button class="dbtn" data-d="hard">HARD</button>
+  </div>
+  <div id="topbar">
+    <div class="counter" id="mine-count">💣 10</div>
+    <button id="face-btn" title="New Game">🙂</button>
+    <div class="timer-val" id="timer-val">000</div>
+  </div>
+  <div id="board-wrap"><div id="board"></div></div>
+  <div id="status" id="status"></div>
+</div>
+<div id="overlay">
+  <div id="obox">
+    <h2 id="o-title"></h2>
+    <p id="o-sub"></p>
+    <button id="o-btn">PLAY AGAIN</button>
+  </div>
+</div>
+<script>
+const CONFIGS={
+  easy:  {rows:9,  cols:9,  mines:10},
+  medium:{rows:16, cols:16, mines:40},
+  hard:  {rows:16, cols:30, mines:99},
+};
+let cfg=CONFIGS.easy, diff='easy';
+let grid,revealed,flagged,mineSet,gameState,firstClick,timerVal,timerInt,cells;
+
+function cellKey(r,c){return r+','+c;}
+
+function initGrid(){
+  clearInterval(timerInt);
+  timerVal=0;
+  document.getElementById('timer-val').textContent='000';
+  document.getElementById('face-btn').textContent='🙂';
+  document.getElementById('mine-count').textContent='💣 '+cfg.mines;
+  document.getElementById('status').textContent='';
+  document.getElementById('overlay').classList.remove('show');
+  grid=Array.from({length:cfg.rows},()=>Array(cfg.cols).fill(0));
+  revealed=Array.from({length:cfg.rows},()=>Array(cfg.cols).fill(false));
+  flagged=Array.from({length:cfg.rows},()=>Array(cfg.cols).fill(false));
+  mineSet=new Set();
+  gameState='waiting';firstClick=true;
+  renderBoard();
+}
+
+function placeMines(safeR,safeC){
+  let placed=0;
+  while(placed<cfg.mines){
+    let r=Math.floor(Math.random()*cfg.rows),c=Math.floor(Math.random()*cfg.cols);
+    let key=cellKey(r,c);
+    if(mineSet.has(key))continue;
+    if(Math.abs(r-safeR)<=1&&Math.abs(c-safeC)<=1)continue;
+    mineSet.add(key);placed++;
+  }
+  // Fill grid numbers
+  for(let r=0;r<cfg.rows;r++)for(let c=0;c<cfg.cols;c++){
+    if(mineSet.has(cellKey(r,c))){grid[r][c]=-1;continue;}
+    let cnt=0;
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+      let nr=r+dr,nc=c+dc;
+      if(nr>=0&&nr<cfg.rows&&nc>=0&&nc<cfg.cols&&mineSet.has(cellKey(nr,nc)))cnt++;
+    }
+    grid[r][c]=cnt;
+  }
+}
+
+function startTimer(){
+  clearInterval(timerInt);
+  timerInt=setInterval(()=>{
+    timerVal=Math.min(999,timerVal+1);
+    document.getElementById('timer-val').textContent=String(timerVal).padStart(3,'0');
+  },1000);
+}
+
+function renderBoard(){
+  const board=document.getElementById('board');
+  board.style.gridTemplateColumns=`repeat(${cfg.cols},32px)`;
+  board.innerHTML='';
+  cells=[];
+  for(let r=0;r<cfg.rows;r++){
+    cells[r]=[];
+    for(let c=0;c<cfg.cols;c++){
+      let el=document.createElement('div');
+      el.className='cell hidden';
+      el.dataset.r=r;el.dataset.c=c;
+      el.addEventListener('click',onCellClick);
+      el.addEventListener('contextmenu',onCellRight);
+      el.addEventListener('touchstart',onTouchStart,{passive:true});
+      el.addEventListener('touchend',onTouchEnd);
+      board.appendChild(el);
+      cells[r][c]=el;
+    }
+  }
+}
+
+function updateCellUI(r,c){
+  let el=cells[r][c];
+  if(!el)return;
+  if(revealed[r][c]){
+    el.className='cell revealed';
+    let v=grid[r][c];
+    if(v===-1){el.textContent='💣';el.classList.add('mine-reveal');}
+    else if(v>0){el.textContent=v;el.classList.add('n'+v);}
+    else el.textContent='';
+  } else if(flagged[r][c]){
+    el.className='cell flagged';el.textContent='🚩';
+  } else {
+    el.className='cell hidden';el.textContent='';
+  }
+}
+
+let touchTimer=null,touchR,touchC;
+function onTouchStart(e){
+  touchR=+this.dataset.r;touchC=+this.dataset.c;
+  touchTimer=setTimeout(()=>{toggleFlag(touchR,touchC);touchTimer=null;},500);
+}
+function onTouchEnd(e){if(touchTimer){clearTimeout(touchTimer);touchTimer=null;}}
+
+function onCellClick(e){
+  let r=+this.dataset.r,c=+this.dataset.c;
+  if(gameState==='over'||gameState==='won')return;
+  if(flagged[r][c])return;
+  if(revealed[r][c]){chordReveal(r,c);return;}
+  if(firstClick){
+    firstClick=false;placeMines(r,c);gameState='playing';startTimer();
+  }
+  reveal(r,c);
+}
+
+function onCellRight(e){
+  e.preventDefault();
+  let r=+this.dataset.r,c=+this.dataset.c;
+  if(gameState==='over'||gameState==='won')return;
+  if(revealed[r][c])return;
+  toggleFlag(r,c);
+}
+
+function toggleFlag(r,c){
+  if(gameState==='over'||gameState==='won')return;
+  if(revealed[r][c])return;
+  flagged[r][c]=!flagged[r][c];
+  updateCellUI(r,c);
+  let cnt=cfg.mines-countFlags();
+  document.getElementById('mine-count').textContent='💣 '+cnt;
+}
+
+function countFlags(){let n=0;for(let r=0;r<cfg.rows;r++)for(let c=0;c<cfg.cols;c++)if(flagged[r][c])n++;return n;}
+
+function reveal(r,c){
+  if(r<0||r>=cfg.rows||c<0||c>=cfg.cols)return;
+  if(revealed[r][c]||flagged[r][c])return;
+  revealed[r][c]=true;
+  if(grid[r][c]===-1){
+    // Hit mine
+    cells[r][c].classList.add('mine-hit');
+    revealAllMines(r,c);
+    gameOver(false);return;
+  }
+  updateCellUI(r,c);
+  if(grid[r][c]===0){
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++)reveal(r+dr,c+dc);
+  }
+  checkWin();
+}
+
+function chordReveal(r,c){
+  // Reveal neighbors if correct flags around
+  if(!revealed[r][c]||grid[r][c]<=0)return;
+  let fCount=0;
+  for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+    let nr=r+dr,nc=c+dc;
+    if(nr>=0&&nr<cfg.rows&&nc>=0&&nc<cfg.cols&&flagged[nr][nc])fCount++;
+  }
+  if(fCount===grid[r][c]){
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+      let nr=r+dr,nc=c+dc;
+      if(nr>=0&&nr<cfg.rows&&nc>=0&&nc<cfg.cols&&!flagged[nr][nc]&&!revealed[nr][nc])reveal(nr,nc);
+    }
+  }
+}
+
+function revealAllMines(hitR,hitC){
+  for(let r=0;r<cfg.rows;r++)for(let c=0;c<cfg.cols;c++){
+    if(mineSet.has(cellKey(r,c))&&!flagged[r][c]){
+      revealed[r][c]=true;updateCellUI(r,c);
+      if(r===hitR&&c===hitC)cells[r][c].classList.add('mine-hit');
+    }
+    if(flagged[r][c]&&!mineSet.has(cellKey(r,c))){
+      // Wrong flag
+      let el=cells[r][c];el.className='cell revealed';el.textContent='❌';
+    }
+  }
+}
+
+function checkWin(){
+  let unrevealed=0;
+  for(let r=0;r<cfg.rows;r++)for(let c=0;c<cfg.cols;c++)if(!revealed[r][c])unrevealed++;
+  if(unrevealed===cfg.mines){
+    // Flag all remaining
+    for(let r=0;r<cfg.rows;r++)for(let c=0;c<cfg.cols;c++){
+      if(!revealed[r][c]){flagged[r][c]=true;updateCellUI(r,c);}
+    }
+    gameOver(true);
+  }
+}
+
+function gameOver(won){
+  clearInterval(timerInt);
+  gameState=won?'won':'over';
+  document.getElementById('face-btn').textContent=won?'😎':'😵';
+  document.getElementById('mine-count').textContent=won?'🎉 0':'💣 '+cfg.mines;
+  setTimeout(()=>{
+    let ov=document.getElementById('overlay');
+    document.getElementById('o-title').textContent=won?'YOU WIN! 🎉':'GAME OVER 💥';
+    document.getElementById('o-title').style.color=won?'#4f4':'#f44';
+    document.getElementById('o-sub').textContent=won?`Cleared in ${timerVal}s`:`Better luck next time!`;
+    ov.classList.add('show');
+  },won?400:600);
+}
+
+// Difficulty buttons
+document.querySelectorAll('.dbtn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    diff=btn.dataset.d;cfg=CONFIGS[diff];
+    document.querySelectorAll('.dbtn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    initGrid();
+  });
+});
+
+document.getElementById('face-btn').addEventListener('click',initGrid);
+document.getElementById('o-btn').addEventListener('click',()=>{
+  document.getElementById('overlay').classList.remove('show');initGrid();
+});
+
+initGrid();
+</script>
